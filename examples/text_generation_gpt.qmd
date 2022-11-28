@@ -1,0 +1,121 @@
+---
+title: "GPT text generation with KerasNLP"
+authors: 
+  - "[Jesse Chan](https://github.com/jessechancy)"
+  - "[terrytangyuan](https://github.com/terrytangyuan) - R translation"
+date-created: 2022/11/28
+date-last-modified: 2022/11/28
+description: "Using KerasNLP to train a mini-GPT model for text generation."
+categories: [generative]
+aliases: 
+  - ../guide/keras/examples/text_generation_gpt/index.html
+---
+
+## Introduction
+
+In this example, we will use KerasNLP to build a scaled down Generative
+Pre-Trained (GPT) model. GPT is a Transformer-based model that allows you to generate
+sophisticated text from a prompt.
+
+We will train the model on the [simplebooks-92](https://arxiv.org/abs/1911.12391) corpus,
+which is a dataset made from several novels. It is a good dataset for this example since
+it has a small vocabulary and high word frequency, which is beneficial when training a
+model with few parameters.
+
+This example combines concepts from
+[Text generation with a miniature GPT](https://keras.io/examples/generative/text_generation_with_miniature_gpt/)
+with KerasNLP abstractions. We will demonstrate how KerasNLP tokenization, layers and
+metrics simplify the training
+process, and then show how to generate output text using the KerasNLP sampling utilities.
+
+Note: If you are running this example on a Colab,
+make sure to enable GPU runtime for faster training.
+This example requires KerasNLP. You can install it via the following command:
+`reticulate::py_install(c("git+https://github.com/keras-team/keras-nlp.git"), envname = "r-tensorflow-website", pip = TRUE)`
+
+
+## Setup
+
+```{r}
+reticulate::use_virtualenv("r-tensorflow-website")
+keras_nlp <- reticulate::import("keras_nlp")
+library(reticulate)
+library(tensorflow)
+library(keras)
+library(tfdatasets)
+```
+
+## Settings & hyperparameters
+
+```{r}
+# Data
+BATCH_SIZE <-64
+SEQ_LEN <- 128
+MIN_TRAINING_SEQ_LEN <- 450
+
+# Model
+EMBED_DIM <-256
+FEED_FORWARD_DIM <- 256
+NUM_HEADS <- 3
+NUM_LAYERS <- 2
+VOCAB_SIZE <- 5000  # Limits parameters in model.
+
+# Training
+EPOCHS <- 6
+
+# Inference
+NUM_TOKENS_TO_GENERATE <- 80
+```
+
+## Load the data
+
+Now, let's download the dataset! The SimpleBooks dataset consists of 1,573 Gutenberg books, and has
+one of the smallest vocabulary size to word-level tokens ratio. It has a vocabulary size of ~98k,
+a third of WikiText-103's, with around the same number of tokens (~100M). This makes it easy to fit a small model.
+
+```{r}
+get_file(origin = "https://dldata-public.s3.us-east-2.amazonaws.com/simplebooks.zip", extract = TRUE)
+
+# Load simplebooks-92 train set and filter out short lines.
+raw_train_ds <- text_line_dataset("/Users/yuan.tang/.keras/datasets/simplebooks/simplebooks-92-raw/train.txt") %>%
+  dataset_filter(function(x) {
+    return (tf$strings$length(x) > MIN_TRAINING_SEQ_LEN)
+  }) %>%
+  dataset_batch(BATCH_SIZE) %>%
+  dataset_shuffle(buffer_size = 256)
+
+# Load simplebooks-92 validation set and filter out short lines.
+raw_val_ds <- text_line_dataset("/Users/yuan.tang/.keras/datasets/simplebooks/simplebooks-92-raw/valid.txt") %>%
+  dataset_filter(function(x) {
+    return (tf$strings$length(x) > MIN_TRAINING_SEQ_LEN)
+  }) %>%
+  dataset_batch(BATCH_SIZE)
+```
+
+## Train the tokenizer
+
+We train the tokenizer from the training dataset for a vocabulary size of `VOCAB_SIZE`,
+which is a tuned hyperparameter. We want to limit the vocabulary as much as possible, as
+we will see later on
+that it has a large affect on the number of model parameters. We also don't want to include
+*too few* vocabulary terms, or there would be too many out-of-vocabulary (OOV) sub-words. In
+addition, three tokens are reserved in the vocabulary:
+
+- `"[PAD]"` for padding sequences to `SEQ_LEN`. This token has index 0 in both
+`reserved_tokens` and `vocab`, since `WordPieceTokenizer` (and other layers) consider
+`0`/`vocab[0]` as the default padding.
+- `"[UNK]"` for OOV sub-words, which should match the default `oov_token="[UNK]"` in
+`WordPieceTokenizer`.
+- `"[BOS]"` stands for beginning of sentence, but here technically it is a token
+representing the beginning of each line of training data.
+
+```{r}
+vocab <- keras_nlp$tokenizers$compute_word_piece_vocabulary()
+
+  vocab = keras_nlp.tokenizers.compute_word_piece_vocabulary(
+    raw_train_ds,
+    vocabulary_size=VOCAB_SIZE,
+    lowercase=True,
+    reserved_tokens=["[PAD]", "[UNK]", "[BOS]"],
+)
+```
