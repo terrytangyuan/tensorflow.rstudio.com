@@ -110,12 +110,6 @@ addition, three tokens are reserved in the vocabulary:
 representing the beginning of each line of training data.
 
 ```{r}
+# TODO: this requires tensorflow-text, which does not support Apple M1 yet. Tried building from source and hacked around but tensorflow-macos>=2.11.0 is required (not on PyPI yet). tensorflow-macos==2.10.0 does not seem compatible. Ref: https://developer.apple.com/forums/thread/700906
 vocab <- keras_nlp$tokenizers$compute_word_piece_vocabulary()
-
-  vocab = keras_nlp.tokenizers.compute_word_piece_vocabulary(
-    raw_train_ds,
-    vocabulary_size=VOCAB_SIZE,
-    lowercase=True,
-    reserved_tokens=["[PAD]", "[UNK]", "[BOS]"],
-)
 ```
